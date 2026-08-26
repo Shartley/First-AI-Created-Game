@@ -26,7 +26,7 @@ small{opacity:.75}
 <body>
 <div id="hud">
  <div id="top"><div id="objective" class="pill">OBJECTIVE: Find the vent and escape the bedroom</div><div id="size" class="pill">SIZE: NORMAL · HUMAN</div></div>
- <div id="cross">+</div><div id="prompt"></div><div id="toast"></div>
+ <div id="cross">+</div><div id="prompt"></div><div id="toast"></div><div id="growCue" class="pill" style="position:absolute;left:50%;top:70%;transform:translateX(-50%);display:none;font-weight:800">SAFE TO GROW — PRESS 3</div>
  <div id="help" class="pill">WASD Move · Mouse Look · Space Jump · E Interact · 1 Tiny · 2 Normal · 3 Large · R Restart</div>
 </div>
 <div id="start" class="screen"><div class="card"><h1>Growing Pains</h1><p>A one-room size-shifting puzzle game.</p><p>Escape the bedroom by learning when to be <b>Tiny</b>, <b>Normal</b>, and <b>Large</b>.</p><button id="play">PLAY</button><br><small>Click Play, then click the game to capture the mouse.</small></div></div>
@@ -46,7 +46,7 @@ const objects=[], solids=[], interactables=[];
 const state={size:'NORMAL',scale:1,speed:4.4,jump:6.5,vy:0,onGround:true,hasKey:false,ventDone:false,pencilDone:false,dresserDone:false,chairDone:false,keyReady:false,won:false,growthHintShown:false};
 const player={pos:new THREE.Vector3(0,1.0,7),yaw:0,pitch:0};
 const keys={};
-const ui={size:document.querySelector('#size'),obj:document.querySelector('#objective'),prompt:document.querySelector('#prompt'),toast:document.querySelector('#toast')};
+const ui={size:document.querySelector('#size'),obj:document.querySelector('#objective'),prompt:document.querySelector('#prompt'),toast:document.querySelector('#toast'),growCue:document.querySelector('#growCue')};
 
 function box(name,pos,size,color,solid=true){
  const g=new THREE.BoxGeometry(...size), m=new THREE.MeshStandardMaterial({color,roughness:.75});
@@ -109,7 +109,7 @@ const growthZoneMat=new THREE.MeshStandardMaterial({
  emissiveIntensity:.28,
  roughness:.9
 });
-const growthZone=new THREE.Mesh(new THREE.CylinderGeometry(1.25,1.25,.025,48),growthZoneMat);
+const growthZone=new THREE.Mesh(new THREE.CylinderGeometry(1.55,1.55,.025,48),growthZoneMat);
 growthZone.position.set(0,.075,2);
 scene.add(growthZone);
 
@@ -129,37 +129,60 @@ function collides(p){
  }
  return false;
 }
+function inSafeGrowthZone(){
+ return Math.hypot(
+   player.pos.x-growthZone.position.x,
+   player.pos.z-growthZone.position.z
+ ) <= 1.75;
+}
+
 function changeSize(which){
  if(!state.onGround){toast('Land before changing size.');return}
- const map={TINY:{s:.28,sp:3.2,j:3.2,f:82},NORMAL:{s:1,sp:4.4,j:6.5,f:70},LARGE:{s:1.75,sp:3.6,j:7.0,f:62}},v=map[which];
+ const map={
+   TINY:{s:.28,sp:3.2,j:3.2,f:82},
+   NORMAL:{s:1,sp:4.4,j:6.5,f:70},
+   LARGE:{s:1.75,sp:3.6,j:7.0,f:62}
+ },v=map[which];
+
  if(which==='LARGE'){
    const oldScale=state.scale;
-   const oldHeight=1.75*oldScale;
-   state.scale=v.s;
+   const safeZone=inSafeGrowthZone();
 
-   // Move the clearance-test position upward so the enlarged player's feet
-   // remain planted on the same surface instead of intersecting the floor.
-   const test=player.pos.clone();
-   const newHeight=height();
-   test.y += (newHeight-oldHeight)/2;
+   // Inside the marked rug zone, Large is ALWAYS permitted.
+   if(safeZone){
+     state.scale=v.s;
+     player.pos.y=height()/2; // floor-level safe zone: keep feet planted exactly on floor
+   } else {
+     // Everywhere else, perform a normal clearance test.
+     const oldHeight=1.75*oldScale;
+     state.scale=v.s;
+     const test=player.pos.clone();
+     const newHeight=height();
+     test.y += (newHeight-oldHeight)/2;
 
-   // The center-rug tutorial zone is intentionally designed as safe growth space.
-   const inGrowthZone=(typeof growthZone!=='undefined') &&
-     Math.hypot(player.pos.x-growthZone.position.x,player.pos.z-growthZone.position.z)<1.45;
-
-   if(!inGrowthZone && collides(test)){
-     state.scale=oldScale;
-     toast("Not enough room to grow here.");
-     return;
+     if(collides(test)){
+       state.scale=oldScale;
+       toast("Not enough room to grow here. Move to the marked rug area.");
+       return;
+     }
+     player.pos.y=test.y;
    }
-
-   // Apply the corrected standing height after successful growth.
-   player.pos.y=test.y;
  }
- state.size=which;state.scale=v.s;state.speed=v.sp;state.jump=v.j;camera.fov=v.f;camera.updateProjectionMatrix();
+
+ state.size=which;
+ state.scale=v.s;
+ state.speed=v.sp;
+ state.jump=v.j;
+ camera.fov=v.f;
+ camera.updateProjectionMatrix();
+
  const role=which==='TINY'?'SMALL / VENT-SIZED':which==='LARGE'?'LARGE / STRONG':'NORMAL / HUMAN';
  ui.size.textContent='SIZE: '+which+' · '+role;
- toast(which==='TINY'?'TINY: you can fit through vents and small gaps.':which==='LARGE'?'LARGE: you can move heavy furniture.':'NORMAL: best for handling smaller objects.');
+ toast(
+   which==='TINY'?'TINY: you can fit through vents and small gaps.':
+   which==='LARGE'?'LARGE: you can move heavy furniture.':
+   'NORMAL: best for handling smaller objects.'
+ );
 }
 
 function interact(){
@@ -216,14 +239,15 @@ function update(dt){
  camera.position.copy(player.pos);camera.position.y+=height()*.36;
  camera.rotation.order='YXZ';camera.rotation.y=player.yaw;camera.rotation.x=player.pitch;
 
- // Teach the player where there is enough clearance to become Large.
- const growthDist=Math.hypot(player.pos.x-growthZone.position.x,player.pos.z-growthZone.position.z);
- if(growthDist<1.45 && state.size!=='LARGE' && !state.growthHintShown){
+ // The hint and permission now use the exact same safe-zone test.
+ const safeToGrow=inSafeGrowthZone();
+ ui.growCue.style.display=(safeToGrow && state.size!=='LARGE')?'block':'none';
+
+ if(safeToGrow && state.size!=='LARGE' && !state.growthHintShown){
    toast("There's plenty of space here. Try becoming LARGE [3].");
    state.growthHintShown=true;
  }
- // Allow the hint to appear again if the player leaves and later returns without learning it.
- if(growthDist>2.4 && state.size!=='LARGE') state.growthHintShown=false;
+ if(!safeToGrow && state.size!=='LARGE') state.growthHintShown=false;
 
  nearestPrompt();
 }
