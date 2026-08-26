@@ -43,7 +43,7 @@ const scene=new THREE.Scene(); scene.background=new THREE.Color(0x171421); scene
 const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.03,100);
 const clock=new THREE.Clock();
 const objects=[], solids=[], interactables=[];
-const state={size:'NORMAL',scale:1,speed:4.4,jump:6.5,vy:0,onGround:true,hasKey:false,ventDone:false,pencilDone:false,dresserDone:false,chairDone:false,keyReady:false,won:false};
+const state={size:'NORMAL',scale:1,speed:4.4,jump:6.5,vy:0,onGround:true,hasKey:false,ventDone:false,pencilDone:false,dresserDone:false,chairDone:false,keyReady:false,won:false,growthHintShown:false};
 const player={pos:new THREE.Vector3(0,1.0,7),yaw:0,pitch:0};
 const keys={};
 const ui={size:document.querySelector('#size'),obj:document.querySelector('#objective'),prompt:document.querySelector('#prompt'),toast:document.querySelector('#toast')};
@@ -97,7 +97,22 @@ box('finalShelf',[2.2,4.0,-1.2],[4.0,.3,1.5],0x4e3428);
 const key=label(box('key',[2.2,4.35,-1.2],[.45,.12,.18],0xd9b447,false),'Take key'); key.visible=false;
 
 // Decorations
+
 box('rug',[0,.03,2],[5.5,.05,4.2],0x51495f,false);
+
+// Subtle Large-size teaching zone near the center of the rug.
+const growthZoneMat=new THREE.MeshStandardMaterial({
+ color:0x8b7aa8,
+ transparent:true,
+ opacity:.22,
+ emissive:0x493d63,
+ emissiveIntensity:.28,
+ roughness:.9
+});
+const growthZone=new THREE.Mesh(new THREE.CylinderGeometry(1.25,1.25,.025,48),growthZoneMat);
+growthZone.position.set(0,.075,2);
+scene.add(growthZone);
+
 box('window',[-3.5,5.5,-8.8],[4.2,2.5,.08],0x88b9c9,false);
 for(let i=0;i<5;i++) box('book',[-5.7+i*.45,2.85,-4],[.3,.55,.7],[0x784d57,0x536c75,0x756247][i%3],false);
 
@@ -177,6 +192,16 @@ function update(dt){
  for(const o of solids){const s=o.userData.size,top=o.position.y+s[1]/2,r=radius();if(player.pos.x>o.position.x-s[0]/2-r&&player.pos.x<o.position.x+s[0]/2+r&&player.pos.z>o.position.z-s[2]/2-r&&player.pos.z<o.position.z+s[2]/2+r){if(state.vy<=0&&player.pos.y-height()/2<top+.18&&player.pos.y-height()/2>top-.35){player.pos.y=top+height()/2;state.vy=0;state.onGround=true}}}
  camera.position.copy(player.pos);camera.position.y+=height()*.36;
  camera.rotation.order='YXZ';camera.rotation.y=player.yaw;camera.rotation.x=player.pitch;
+
+ // Teach the player where there is enough clearance to become Large.
+ const growthDist=Math.hypot(player.pos.x-growthZone.position.x,player.pos.z-growthZone.position.z);
+ if(growthDist<1.45 && state.size!=='LARGE' && !state.growthHintShown){
+   toast("There's plenty of space here. Try becoming LARGE [3].");
+   state.growthHintShown=true;
+ }
+ // Allow the hint to appear again if the player leaves and later returns without learning it.
+ if(growthDist>2.4 && state.size!=='LARGE') state.growthHintShown=false;
+
  nearestPrompt();
 }
 function loop(){requestAnimationFrame(loop);const dt=Math.min(clock.getDelta(),.033);update(dt);renderer.render(scene,camera)} loop();
