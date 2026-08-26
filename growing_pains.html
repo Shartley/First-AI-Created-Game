@@ -25,7 +25,7 @@ small{opacity:.75}
 </head>
 <body>
 <div id="hud">
- <div id="top"><div id="objective" class="pill">OBJECTIVE: Find a way out</div><div id="size" class="pill">SIZE: NORMAL</div></div>
+ <div id="top"><div id="objective" class="pill">OBJECTIVE: Find the vent and escape the bedroom</div><div id="size" class="pill">SIZE: NORMAL · HUMAN</div></div>
  <div id="cross">+</div><div id="prompt"></div><div id="toast"></div>
  <div id="help" class="pill">WASD Move · Mouse Look · Space Jump · E Interact · 1 Tiny · 2 Normal · 3 Large · R Restart</div>
 </div>
@@ -73,7 +73,11 @@ box('frontL',[-4.7,4.5,9],[6.6,9,.3],0x777080); box('frontR',[4.7,4.5,9],[6.6,9,
 const door=label(box('door',[0,2.2,8.82],[2.8,4.4,.25],0x4c2e22),'Open bedroom door');
 
 // Bed
-box('bed',[4.8,.65,3.5],[5.2,1.3,6.4],0x4d596b); box('pillow',[4.8,1.45,1.5],[3.5,.35,1.2],0xd8d1c7,false);
+box('bedFrame',[4.8,.42,3.5],[5.4,.55,6.6],0x3b281f);
+box('mattress',[4.8,.92,3.5],[5.05,.55,6.15],0xd8d2c7);
+box('blanket',[4.8,1.23,4.15],[4.9,.14,4.3],0x596b82,false);
+box('pillow',[4.8,1.38,1.45],[3.3,.32,1.15],0xf0ebe2,false);
+box('headboard',[4.8,1.75,.35],[5.35,2.2,.3],0x4a3025);
 // Desk + gap/pencil puzzle
 box('deskTop',[-4.5,2.5,-3.8],[5.4,.35,2.6],0x5a3828);
 box('leg1',[-6.5,1.2,-4.7],[.35,2.4,.35],0x4b2e20);box('leg2',[-2.5,1.2,-4.7],[.35,2.4,.35],0x4b2e20);
@@ -82,9 +86,11 @@ const pencil=label(box('pencil',[-4.5,2.85,-3.8],[.25,.25,2.2],0xe2b83f),'Knock 
 box('shelf',[6.4,2.5,-5.7],[2.2,5,1.1],0x493126); for(let y=.7;y<4.8;y+=1.1) box('books',[6.4,y,-5.05],[1.8,.55,.3],0x8c5260,false);
 // Vent and low tunnel
 const vent=label(box('vent',[-7.72,.65,-5.5],[.18,1.0,1.5],0x363942),'Enter vent');
+for(let z=-6.05;z<=-4.95;z+=.22) box('ventSlat',[-7.60,.65,z],[.08,.72,.08],0x8b9099,false);
 const tunnelExit=box('tunnelBlock',[-6.8,.6,-7.5],[2.2,1.2,.25],0x34313a);
 // Dresser blocking passage
 const dresser=label(box('dresser',[2.1,1.55,-6.9],[3.2,3.1,1.4],0x684631),'Move dresser');
+for(let y=.65;y<2.8;y+=.72){box('drawer',[2.1,y,-6.16],[2.75,.5,.08],0x7e5941,false);box('handle',[2.1,y,-6.08],[.55,.08,.08],0xd0a25b,false);}
 // Chair final puzzle
 const chair=label(box('chair',[-.8,1.0,-1.0],[1.6,2.0,1.6],0x6a4937),'Move chair under shelf');
 box('finalShelf',[2.2,4.0,-1.2],[4.0,.3,1.5],0x4e3428);
@@ -109,12 +115,17 @@ function collides(p){
  return false;
 }
 function changeSize(which){
+ if(!state.onGround){toast('Land before changing size.');return}
  const map={TINY:{s:.28,sp:3.2,j:3.2,f:82},NORMAL:{s:1,sp:4.4,j:6.5,f:70},LARGE:{s:1.75,sp:3.6,j:7.0,f:62}},v=map[which];
  if(which==='LARGE'){const test=player.pos.clone(); const old=state.scale;state.scale=v.s;if(collides(test)){state.scale=old;toast("Not enough room to grow here.");return}}
- state.size=which;state.scale=v.s;state.speed=v.sp;state.jump=v.j;camera.fov=v.f;camera.updateProjectionMatrix();ui.size.textContent='SIZE: '+which;toast(which==='TINY'?'Everything looks bigger...':which==='LARGE'?'You feel powerful.':'Back to normal.');
+ state.size=which;state.scale=v.s;state.speed=v.sp;state.jump=v.j;camera.fov=v.f;camera.updateProjectionMatrix();
+ const role=which==='TINY'?'SMALL / VENT-SIZED':which==='LARGE'?'LARGE / STRONG':'NORMAL / HUMAN';
+ ui.size.textContent='SIZE: '+which+' · '+role;
+ toast(which==='TINY'?'TINY: you can fit through vents and small gaps.':which==='LARGE'?'LARGE: you can move heavy furniture.':'NORMAL: best for handling smaller objects.');
 }
 
 function interact(){
+ if(!state.onGround){toast('Land before interacting.');return}
  let best=null,bd=2.2*state.scale+1;
  for(const o of interactables){if(o.visible&&dist(o)<bd&&dist(o)<bd){best=o;bd=dist(o)}}
  if(!best)return;
@@ -151,7 +162,7 @@ addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='Digit1')changeSize
 addEventListener('keyup',e=>keys[e.code]=false);
 canvas.addEventListener('click',()=>canvas.requestPointerLock());
 addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas){player.yaw-=e.movementX*.0023;player.pitch-=e.movementY*.002;player.pitch=Math.max(-1.25,Math.min(1.25,player.pitch))}});
-document.querySelector('#play').onclick=()=>{document.querySelector('#start').style.display='none';canvas.requestPointerLock();toast('Find a way out. Try the vent.');};
+document.querySelector('#play').onclick=()=>{document.querySelector('#start').style.display='none';canvas.requestPointerLock();toast('Start with the metal vent low on the left wall. Try TINY size.');};
 
 function resize(){renderer.setSize(innerWidth,innerHeight,false);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix()} addEventListener('resize',resize);resize();
 
@@ -160,7 +171,7 @@ function update(dt){
  const forward=new THREE.Vector3(-Math.sin(player.yaw),0,-Math.cos(player.yaw)), right=new THREE.Vector3(Math.cos(player.yaw),0,-Math.sin(player.yaw));
  let dir=new THREE.Vector3(); if(keys.KeyW)dir.add(forward);if(keys.KeyS)dir.sub(forward);if(keys.KeyD)dir.add(right);if(keys.KeyA)dir.sub(right);if(dir.lengthSq())dir.normalize();
  const np=player.pos.clone();np.x+=dir.x*state.speed*dt;if(!collides(np))player.pos.x=np.x;np.copy(player.pos);np.z+=dir.z*state.speed*dt;if(!collides(np))player.pos.z=np.z;
- state.vy-=14*dt;player.pos.y+=state.vy*dt; const base=height()/2;
+ state.vy-=14*dt;player.pos.y+=state.vy*dt; state.onGround=false; const base=height()/2;
  if(player.pos.y<base){player.pos.y=base;state.vy=0;state.onGround=true}
  // crude elevated surfaces
  for(const o of solids){const s=o.userData.size,top=o.position.y+s[1]/2,r=radius();if(player.pos.x>o.position.x-s[0]/2-r&&player.pos.x<o.position.x+s[0]/2+r&&player.pos.z>o.position.z-s[2]/2-r&&player.pos.z<o.position.z+s[2]/2+r){if(state.vy<=0&&player.pos.y-height()/2<top+.18&&player.pos.y-height()/2>top-.35){player.pos.y=top+height()/2;state.vy=0;state.onGround=true}}}
