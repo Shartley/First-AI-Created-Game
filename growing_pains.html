@@ -132,7 +132,30 @@ function collides(p){
 function changeSize(which){
  if(!state.onGround){toast('Land before changing size.');return}
  const map={TINY:{s:.28,sp:3.2,j:3.2,f:82},NORMAL:{s:1,sp:4.4,j:6.5,f:70},LARGE:{s:1.75,sp:3.6,j:7.0,f:62}},v=map[which];
- if(which==='LARGE'){const test=player.pos.clone(); const old=state.scale;state.scale=v.s;if(collides(test)){state.scale=old;toast("Not enough room to grow here.");return}}
+ if(which==='LARGE'){
+   const oldScale=state.scale;
+   const oldHeight=1.75*oldScale;
+   state.scale=v.s;
+
+   // Move the clearance-test position upward so the enlarged player's feet
+   // remain planted on the same surface instead of intersecting the floor.
+   const test=player.pos.clone();
+   const newHeight=height();
+   test.y += (newHeight-oldHeight)/2;
+
+   // The center-rug tutorial zone is intentionally designed as safe growth space.
+   const inGrowthZone=(typeof growthZone!=='undefined') &&
+     Math.hypot(player.pos.x-growthZone.position.x,player.pos.z-growthZone.position.z)<1.45;
+
+   if(!inGrowthZone && collides(test)){
+     state.scale=oldScale;
+     toast("Not enough room to grow here.");
+     return;
+   }
+
+   // Apply the corrected standing height after successful growth.
+   player.pos.y=test.y;
+ }
  state.size=which;state.scale=v.s;state.speed=v.sp;state.jump=v.j;camera.fov=v.f;camera.updateProjectionMatrix();
  const role=which==='TINY'?'SMALL / VENT-SIZED':which==='LARGE'?'LARGE / STRONG':'NORMAL / HUMAN';
  ui.size.textContent='SIZE: '+which+' · '+role;
