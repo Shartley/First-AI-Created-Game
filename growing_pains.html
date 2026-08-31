@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Growing Pains</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#111;font-family:system-ui,Arial,sans-serif}
+canvas{display:block}
+#hud{position:fixed;inset:0;pointer-events:none;color:#fff;text-shadow:0 2px 5px #000}
+#top{position:absolute;top:18px;left:20px;right:20px;display:flex;justify-content:space-between;gap:12px}
+.pill{background:#0009;border:1px solid #ffffff33;border-radius:12px;padding:10px 14px;backdrop-filter:blur(6px)}
+#objective{max-width:540px}
+#prompt{position:absolute;left:50%;bottom:90px;transform:translateX(-50%);font-weight:700;background:#000b;padding:10px 16px;border-radius:10px;display:none}
+#cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:24px}
+#toast{position:absolute;left:50%;top:22%;transform:translateX(-50%);background:#000b;padding:10px 16px;border-radius:10px;opacity:0;transition:.25s}
+#help{position:absolute;bottom:16px;left:20px;font-size:13px;opacity:.9}
+.screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(#171421dd,#07070bee);color:#fff;z-index:5}
+.card{width:min(620px,86vw);padding:34px;border:1px solid #ffffff22;background:#111b;border-radius:20px;box-shadow:0 20px 80px #0008;text-align:center}
+h1{font-size:54px;margin:0 0 8px} h2{font-size:38px;margin:0 0 10px}
+button{border:0;border-radius:12px;padding:12px 20px;font-size:17px;font-weight:800;cursor:pointer;margin:7px;background:#eee;color:#111}
+small{opacity:.75}
+#win{display:none}
+</style>
+</head>
+<body>
+<div id="hud">
+ <div id="top"><div id="objective" class="pill">OBJECTIVE: Find the vent and escape the bedroom</div><div id="size" class="pill">SIZE: NORMAL · HUMAN</div></div>
+ <div id="cross">+</div><div id="prompt"></div><div id="toast"></div><div id="growCue" class="pill" style="position:absolute;left:50%;top:70%;transform:translateX(-50%);display:none;font-weight:800">SAFE TO GROW — PRESS 3</div>
+ <div id="help" class="pill">WASD Move · Mouse Look · Space Jump · E Interact · 1 Tiny · 2 Normal · 3 Large · R Restart</div>
+</div>
+<div id="start" class="screen"><div class="card"><h1>Growing Pains</h1><p>A one-room size-shifting puzzle game.</p><p>Escape the bedroom by learning when to be <b>Tiny</b>, <b>Normal</b>, and <b>Large</b>.</p><button id="play">PLAY</button><br><small>Click Play, then click the game to capture the mouse.</small></div></div>
+<div id="win" class="screen"><div class="card"><h2>YOU ESCAPED</h2><p>You mastered all three sizes.</p><button onclick="location.reload()">RESTART</button></div></div>
+<canvas id="c"></canvas>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js';
+
+const canvas=document.querySelector('#c'), renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.shadowMap.enabled=true;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x171421); scene.fog=new THREE.Fog(0x171421,18,36);
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.03,100);
+const clock=new THREE.Clock();
+const objects=[], solids=[], interactables=[];
+const state={size:'NORMAL',scale:1,speed:4.4,jump:6.5,vy:0,onGround:true,hasKey:false,ventDone:false,pencilDone:false,dresserDone:false,chairDone:false,keyReady:false,won:false,growthHintShown:false};
+const player={pos:new THREE.Vector3(0,1.0,7),yaw:0,pitch:0};
+const keys={};
+const ui={size:document.querySelector('#size'),obj:document.querySelector('#objective'),prompt:document.querySelector('#prompt'),toast:document.querySelector('#toast'),growCue:document.querySelector('#growCue')};
+
+function box(name,pos,size,color,solid=true){
+ const g=new THREE.BoxGeometry(...size), m=new THREE.MeshStandardMaterial({color,roughness:.75});
+ const o=new THREE.Mesh(g,m); o.name=name;o.position.set(...pos);o.castShadow=o.receiveShadow=true;scene.add(o);
+ o.userData.size=size; objects.push(o); if(solid) solids.push(o); return o;
+}
+function label(o,text){o.userData.label=text;interactables.push(o);return o}
+function toast(t){ui.toast.textContent=t;ui.toast.style.opacity=1;clearTimeout(toast.t);toast.t=setTimeout(()=>ui.toast.style.opacity=0,1800)}
+function setObjective(t){ui.obj.textContent='OBJECTIVE: '+t}
+function removeSolid(o){let i=solids.indexOf(o);if(i>=0)solids.splice(i,1)}
+function dist(o){return o.position.distanceTo(player.pos)}
+
+scene.add(new THREE.HemisphereLight(0xb9c6ff,0x3a241c,1.5));
+const sun=new THREE.DirectionalLight(0xffe2bd,2.4);sun.position.set(-6,10,3);sun.castShadow=true;scene.add(sun);
+const lamp=new THREE.PointLight(0xffbd70,18,8);lamp.position.set(4,3.8,-3);scene.add(lamp);
+
+// Room 16 x 18
+box('floor',[0,-.15,0],[16,.3,18],0x6b4d3a);
+box('back',[0,4.5,-9],[16,9,.3],0x6b6376);
+box('left',[-8,4.5,0],[.3,9,18],0x777080);
+box('right',[8,4.5,0],[.3,9,18],0x777080);
+// front wall split around door
+box('frontL',[-4.7,4.5,9],[6.6,9,.3],0x777080); box('frontR',[4.7,4.5,9],[6.6,9,.3],0x777080);
+const door=label(box('door',[0,2.2,8.82],[2.8,4.4,.25],0x4c2e22),'Open bedroom door');
+
+// Bed
+box('bedFrame',[4.8,.42,3.5],[5.4,.55,6.6],0x3b281f);
+box('mattress',[4.8,.92,3.5],[5.05,.55,6.15],0xd8d2c7);
+box('blanket',[4.8,1.23,4.15],[4.9,.14,4.3],0x596b82,false);
+box('pillow',[4.8,1.38,1.45],[3.3,.32,1.15],0xf0ebe2,false);
+box('headboard',[4.8,1.75,.35],[5.35,2.2,.3],0x4a3025);
+// Desk + gap/pencil puzzle
+box('deskTop',[-4.5,2.5,-3.8],[5.4,.35,2.6],0x5a3828);
+box('leg1',[-6.5,1.2,-4.7],[.35,2.4,.35],0x4b2e20);box('leg2',[-2.5,1.2,-4.7],[.35,2.4,.35],0x4b2e20);
+const pencil=label(box('pencil',[-4.5,2.85,-3.8],[.25,.25,2.2],0xe2b83f),'Knock pencil down');
+// bookshelf / visual dressing
+box('shelf',[6.4,2.5,-5.7],[2.2,5,1.1],0x493126); for(let y=.7;y<4.8;y+=1.1) box('books',[6.4,y,-5.05],[1.8,.55,.3],0x8c5260,false);
+// Vent and low tunnel
+const vent=label(box('vent',[-7.72,.65,-5.5],[.18,1.0,1.5],0x363942),'Enter vent');
+for(let z=-6.05;z<=-4.95;z+=.22) box('ventSlat',[-7.60,.65,z],[.08,.72,.08],0x8b9099,false);
+const tunnelExit=box('tunnelBlock',[-6.8,.6,-7.5],[2.2,1.2,.25],0x34313a);
+// Dresser blocking passage
+const dresser=label(box('dresser',[2.1,1.55,-6.9],[3.2,3.1,1.4],0x684631),'Move dresser');
+for(let y=.65;y<2.8;y+=.72){box('drawer',[2.1,y,-6.16],[2.75,.5,.08],0x7e5941,false);box('handle',[2.1,y,-6.08],[.55,.08,.08],0xd0a25b,false);}
+// Chair final puzzle
+const chair=label(box('chair',[-.8,1.0,-1.0],[1.6,2.0,1.6],0x6a4937),'Move chair under shelf');
+box('finalShelf',[2.2,4.0,-1.2],[4.0,.3,1.5],0x4e3428);
+const key=label(box('key',[2.2,4.35,-1.2],[.45,.12,.18],0xd9b447,false),'Take key'); key.visible=false;
+
+// Decorations
+
+box('rug',[0,.03,2],[5.5,.05,4.2],0x51495f,false);
+
+// Subtle Large-size teaching zone near the center of the rug.
+const growthZoneMat=new THREE.MeshStandardMaterial({
+ color:0x8b7aa8,
+ transparent:true,
+ opacity:.22,
+ emissive:0x493d63,
+ emissiveIntensity:.28,
+ roughness:.9
+});
+const growthZone=new THREE.Mesh(new THREE.CylinderGeometry(1.55,1.55,.025,48),growthZoneMat);
+growthZone.position.set(0,.075,2);
+scene.add(growthZone);
+
+box('window',[-3.5,5.5,-8.8],[4.2,2.5,.08],0x88b9c9,false);
+for(let i=0;i<5;i++) box('book',[-5.7+i*.45,2.85,-4],[.3,.55,.7],[0x784d57,0x536c75,0x756247][i%3],false);
+
+// collision: simple player circle vs AABB horizontal
+function radius(){return .34*state.scale}
+function height(){return 1.75*state.scale}
+function collides(p){
+ const r=radius();
+ for(const o of solids){
+  if(!o.visible)continue;
+  const s=o.userData.size, minX=o.position.x-s[0]/2-r,maxX=o.position.x+s[0]/2+r,minZ=o.position.z-s[2]/2-r,maxZ=o.position.z+s[2]/2+r;
+  const feet=p.y-height()/2, head=p.y+height()/2, omin=o.position.y-s[1]/2,omax=o.position.y+s[1]/2;
+  if(p.x>minX&&p.x<maxX&&p.z>minZ&&p.z<maxZ&&head>omin&&feet<omax) return true;
+ }
+ return false;
+}
+function inSafeGrowthZone(){
+ return Math.hypot(
+   player.pos.x-growthZone.position.x,
+   player.pos.z-growthZone.position.z
+ ) <= 1.75;
+}
+
+function changeSize(which){
+ if(!state.onGround){toast('Land before changing size.');return}
+ const map={
+   TINY:{s:.28,sp:3.2,j:3.2,f:82},
+   NORMAL:{s:1,sp:4.4,j:6.5,f:70},
+   LARGE:{s:1.75,sp:3.6,j:7.0,f:62}
+ },v=map[which];
+
+ if(which==='LARGE'){
+   const oldScale=state.scale;
+   const safeZone=inSafeGrowthZone();
+
+   // Inside the marked rug zone, Large is ALWAYS permitted.
+   if(safeZone){
+     state.scale=v.s;
+     player.pos.y=height()/2; // floor-level safe zone: keep feet planted exactly on floor
+   } else {
+     // Everywhere else, perform a normal clearance test.
+     const oldHeight=1.75*oldScale;
+     state.scale=v.s;
+     const test=player.pos.clone();
+     const newHeight=height();
+     test.y += (newHeight-oldHeight)/2;
+
+     if(collides(test)){
+       state.scale=oldScale;
+       toast("Not enough room to grow here. Move to the marked rug area.");
+       return;
+     }
+     player.pos.y=test.y;
+   }
+ }
+
+ state.size=which;
+ state.scale=v.s;
+ state.speed=v.sp;
+ state.jump=v.j;
+ camera.fov=v.f;
+ camera.updateProjectionMatrix();
+
+ const role=which==='TINY'?'SMALL / VENT-SIZED':which==='LARGE'?'LARGE / STRONG':'NORMAL / HUMAN';
+ ui.size.textContent='SIZE: '+which+' · '+role;
+ toast(
+   which==='TINY'?'TINY: you can fit through vents and small gaps.':
+   which==='LARGE'?'LARGE: you can move heavy furniture.':
+   'NORMAL: best for handling smaller objects.'
+ );
+}
+
+function interact(){
+ if(!state.onGround){toast('Land before interacting.');return}
+ let best=null,bd=2.2*state.scale+1;
+ for(const o of interactables){if(o.visible&&dist(o)<bd&&dist(o)<bd){best=o;bd=dist(o)}}
+ if(!best)return;
+ if(best===vent){
+  if(state.size!=='TINY'){toast('The vent is too small. Try shrinking.');return}
+  state.ventDone=true; vent.visible=false;removeSolid(vent); player.pos.set(-6.6,.3,-6.2);toast('Vent discovered! Tiny spaces can become paths.');setObjective('Use your size to manipulate the room');
+ } else if(best===pencil){
+  if(state.size==='LARGE'){toast('Too clumsy. Try Normal size.');return}
+  if(state.size!=='NORMAL'){toast('You need more leverage. Try Normal size.');return}
+  state.pencilDone=true;pencil.position.set(-3.2,.18,-2.8);pencil.rotation.z=Math.PI/2;toast('The pencil is now a bridge at Tiny size.');
+ } else if(best===dresser){
+  if(state.size!=='LARGE'){toast('It is too heavy. You need to be Large.');return}
+  state.dresserDone=true;dresser.position.x=5.0;toast('A tiny passage was hidden behind it.');setObjective('Combine all three sizes to reach the key');
+ } else if(best===chair){
+  if(state.size!=='LARGE'){toast('The chair barely moves. Grow larger.');return}
+  state.chairDone=true;chair.position.set(1.1,1,-1.2);toast('Chair moved. Now climb while Normal.');
+  key.visible=true;state.keyReady=true;
+ } else if(best===key){
+  if(!state.keyReady)return;
+  if(state.size==='LARGE'){toast('Your hands are too large. Try Normal or Tiny.');return}
+  state.hasKey=true;key.visible=false;toast('You found the bedroom key!');setObjective('Unlock the bedroom door');
+ } else if(best===door){
+  if(!state.hasKey){toast('Locked. The key must be somewhere in the room.');return}
+  state.won=true;document.exitPointerLock?.();document.querySelector('#win').style.display='flex';
+ }
+}
+function nearestPrompt(){
+ let best=null,bd=2.2*state.scale+1;
+ for(const o of interactables){if(o.visible&&dist(o)<bd){best=o;bd=dist(o)}}
+ ui.prompt.style.display=best?'block':'none';if(best)ui.prompt.textContent='E — '+best.userData.label;
+}
+
+addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='Digit1')changeSize('TINY');if(e.code==='Digit2')changeSize('NORMAL');if(e.code==='Digit3')changeSize('LARGE');if(e.code==='KeyE')interact();if(e.code==='KeyR')location.reload();if(e.code==='Space'&&state.onGround){state.vy=state.jump;state.onGround=false}});
+addEventListener('keyup',e=>keys[e.code]=false);
+canvas.addEventListener('click',()=>canvas.requestPointerLock());
+addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas){player.yaw-=e.movementX*.0023;player.pitch-=e.movementY*.002;player.pitch=Math.max(-1.25,Math.min(1.25,player.pitch))}});
+document.querySelector('#play').onclick=()=>{document.querySelector('#start').style.display='none';canvas.requestPointerLock();toast('Start with the metal vent low on the left wall. Try TINY size.');};
+
+function resize(){renderer.setSize(innerWidth,innerHeight,false);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix()} addEventListener('resize',resize);resize();
+
+function update(dt){
+ if(state.won)return;
+ const forward=new THREE.Vector3(-Math.sin(player.yaw),0,-Math.cos(player.yaw)), right=new THREE.Vector3(Math.cos(player.yaw),0,-Math.sin(player.yaw));
+ let dir=new THREE.Vector3(); if(keys.KeyW)dir.add(forward);if(keys.KeyS)dir.sub(forward);if(keys.KeyD)dir.add(right);if(keys.KeyA)dir.sub(right);if(dir.lengthSq())dir.normalize();
+ const np=player.pos.clone();np.x+=dir.x*state.speed*dt;if(!collides(np))player.pos.x=np.x;np.copy(player.pos);np.z+=dir.z*state.speed*dt;if(!collides(np))player.pos.z=np.z;
+ state.vy-=14*dt;player.pos.y+=state.vy*dt; state.onGround=false; const base=height()/2;
+ if(player.pos.y<base){player.pos.y=base;state.vy=0;state.onGround=true}
+ // crude elevated surfaces
+ for(const o of solids){const s=o.userData.size,top=o.position.y+s[1]/2,r=radius();if(player.pos.x>o.position.x-s[0]/2-r&&player.pos.x<o.position.x+s[0]/2+r&&player.pos.z>o.position.z-s[2]/2-r&&player.pos.z<o.position.z+s[2]/2+r){if(state.vy<=0&&player.pos.y-height()/2<top+.18&&player.pos.y-height()/2>top-.35){player.pos.y=top+height()/2;state.vy=0;state.onGround=true}}}
+ camera.position.copy(player.pos);camera.position.y+=height()*.36;
+ camera.rotation.order='YXZ';camera.rotation.y=player.yaw;camera.rotation.x=player.pitch;
+
+ // The hint and permission now use the exact same safe-zone test.
+ const safeToGrow=inSafeGrowthZone();
+ ui.growCue.style.display=(safeToGrow && state.size!=='LARGE')?'block':'none';
+
+ if(safeToGrow && state.size!=='LARGE' && !state.growthHintShown){
+   toast("There's plenty of space here. Try becoming LARGE [3].");
+   state.growthHintShown=true;
+ }
+ if(!safeToGrow && state.size!=='LARGE') state.growthHintShown=false;
+
+ nearestPrompt();
+}
+function loop(){requestAnimationFrame(loop);const dt=Math.min(clock.getDelta(),.033);update(dt);renderer.render(scene,camera)} loop();
+</script>
+</body></html>
